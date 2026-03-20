@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Editor / temp
+~$*.xlsx
+
+# Raw and derived datasets (safety default)
+*.xlsx
+*.csv
+*.json
+processed/
+
+# Local folders
+Langlois/
