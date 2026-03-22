@@ -10,6 +10,7 @@ base = Path('/Users/tegin/Desktop/UCCR/raw_data')
 out_path = base / 'processed' / 'UCCR_Moya_Comparison.xlsx'
 analysis_results_path = base / 'processed' / 'analysis_2ug_results.json'
 urine_results_path = base / 'processed' / 'urine_cortisol_analysis_results.json'
+roc_summary_path = base / 'processed' / 'roc_scenarios' / 'roc_scenarios_summary.csv'
 
 
 def pct_str(value: float | int | None) -> str:
@@ -89,6 +90,177 @@ def build_additional_conditions_table(results_path: Path, analysis_label: str) -
                 )
 
     return pd.DataFrame(rows, columns=columns)
+
+
+def build_roc_scenarios_table(summary_path: Path) -> pd.DataFrame:
+    columns = [
+        'Scenario',
+        'Analysis',
+        'Outcome',
+        'Urine test type',
+        'AUC',
+        'Best cutoff',
+        'Sensitivity',
+        'Specificity',
+        'Accuracy',
+        'n (pos/neg)',
+        'Excluded rows',
+        'Remaining rows',
+        'ROC figure path',
+    ]
+
+    if not summary_path.exists():
+        return pd.DataFrame(columns=columns)
+
+    raw = pd.read_csv(summary_path)
+    rows = []
+    for _, r in raw.iterrows():
+        op = '<=' if str(r.get('direction', 'lower')) == 'lower' else '>='
+        rows.append(
+            {
+                'Scenario': r.get('scenario_label', ''),
+                'Analysis': r.get('analysis', ''),
+                'Outcome': r.get('outcome', ''),
+                'Urine test type': r.get('urine_test_type', ''),
+                'AUC': f"{float(r.get('auc', float('nan'))):.3f}",
+                'Best cutoff': f"{op}{float(r.get('best_threshold', float('nan'))):.2f}",
+                'Sensitivity': pct_str(r.get('best_sensitivity')),
+                'Specificity': pct_str(r.get('best_specificity')),
+                'Accuracy': pct_str(r.get('best_accuracy')),
+                'n (pos/neg)': f"{int(r.get('n_total_model', 0))} ({int(r.get('n_pos', 0))}/{int(r.get('n_neg', 0))})",
+                'Excluded rows': int(r.get('excluded_rows', 0)),
+                'Remaining rows': int(r.get('remaining_rows', 0)),
+                'ROC figure path': r.get('roc_png', ''),
+            }
+        )
+
+    table = pd.DataFrame(rows, columns=columns)
+    return table.sort_values(['Scenario', 'Analysis', 'Outcome', 'Urine test type'])
+
+
+def build_overall_interpretation_table(
+    table_2: pd.DataFrame,
+    table_5: pd.DataFrame,
+    table_6: pd.DataFrame,
+    table_8: pd.DataFrame,
+    table_9: pd.DataFrame,
+    table_11: pd.DataFrame,
+    table_12: pd.DataFrame,
+    table_13: pd.DataFrame,
+) -> pd.DataFrame:
+    rows = []
+
+    cohort = table_2.loc[
+        table_2['Parameter'] == 'Number of dogs used',
+        'Current Dataset (This Workspace)',
+    ].iloc[0]
+    rows.append(
+        {
+            'Topic': 'Cohort and analysis definitions',
+            'Key finding': str(cohort),
+            'Interpretation': 'The current dataset is substantially larger than Moya and supports stratified CLIApost/RIA analyses.',
+        }
+    )
+
+    uccr_diag_clia = table_5.loc[table_5['Assay/Protocol'] == 'Current CLIApost'].iloc[0]
+    uccr_diag_ria = table_5.loc[table_5['Assay/Protocol'] == 'Current RIA'].iloc[0]
+    rows.append(
+        {
+            'Topic': 'UCCR diagnosis performance',
+            'Key finding': (
+                f"CLIApost {uccr_diag_clia['Optimal cutpoint']} (sens {uccr_diag_clia['Sensitivity']}, spec {uccr_diag_clia['Specificity']}); "
+                f"RIA {uccr_diag_ria['Optimal cutpoint']} (sens {uccr_diag_ria['Sensitivity']}, spec {uccr_diag_ria['Specificity']})"
+            ),
+            'Interpretation': 'UCCR diagnosis performance is strong in both assays, with higher specificity in RIA and higher sensitivity in CLIApost.',
+        }
+    )
+
+    uccr_excl_clia = table_6.loc[table_6['Assay/Protocol'] == 'Current CLIApost'].iloc[0]
+    uccr_excl_ria = table_6.loc[table_6['Assay/Protocol'] == 'Current RIA'].iloc[0]
+    rows.append(
+        {
+            'Topic': 'UCCR exclusion performance',
+            'Key finding': (
+                f"CLIApost {uccr_excl_clia['Optimal cutpoint']} (sens {uccr_excl_clia['Sensitivity']}, spec {uccr_excl_clia['Specificity']}); "
+                f"RIA {uccr_excl_ria['Optimal cutpoint']} (sens {uccr_excl_ria['Sensitivity']}, spec {uccr_excl_ria['Specificity']})"
+            ),
+            'Interpretation': 'UCCR supports high sensitivity exclusion in both assays, with stronger specificity in RIA.',
+        }
+    )
+
+    urine_diag_clia = table_8.loc[table_8['Assay/Protocol'] == 'CLIApost'].iloc[0]
+    urine_diag_ria = table_8.loc[table_8['Assay/Protocol'] == 'RIA'].iloc[0]
+    rows.append(
+        {
+            'Topic': 'Urine cortisol diagnosis performance',
+            'Key finding': (
+                f"CLIApost {urine_diag_clia['Optimal cutpoint (nmol/L)']} (sens {urine_diag_clia['Sensitivity']}, spec {urine_diag_clia['Specificity']}); "
+                f"RIA {urine_diag_ria['Optimal cutpoint (nmol/L)']} (sens {urine_diag_ria['Sensitivity']}, spec {urine_diag_ria['Specificity']})"
+            ),
+            'Interpretation': 'Urine cortisol diagnosis is excellent, with perfect sensitivity in RIA at the selected threshold.',
+        }
+    )
+
+    urine_excl_clia = table_9.loc[table_9['Assay/Protocol'] == 'CLIApost'].iloc[0]
+    urine_excl_ria = table_9.loc[table_9['Assay/Protocol'] == 'RIA'].iloc[0]
+    rows.append(
+        {
+            'Topic': 'Urine cortisol exclusion performance',
+            'Key finding': (
+                f"CLIApost {urine_excl_clia['Optimal cutpoint (nmol/L)']} (sens {urine_excl_clia['Sensitivity']}, spec {urine_excl_clia['Specificity']}); "
+                f"RIA {urine_excl_ria['Optimal cutpoint (nmol/L)']} (sens {urine_excl_ria['Sensitivity']}, spec {urine_excl_ria['Specificity']})"
+            ),
+            'Interpretation': 'Urine cortisol exclusion is especially strong in RIA where specificity reaches 100.0% at the selected cutoff.',
+        }
+    )
+
+    addl_uccr_clia_lt1 = table_11.loc[
+        (table_11['Analysis'] == 'UCCR')
+        & (table_11['Scenario'] == 'post missing AND basal <1 ug/dL')
+        & (table_11['Outcome'] == 'HA exclusion (baseline >2 ug/dL OR post-ACTH >2 ug/dL)')
+        & (table_11['Urine test type'] == 'CLIApost')
+    ].iloc[0]
+    addl_uccr_clia_lt2 = table_11.loc[
+        (table_11['Analysis'] == 'UCCR')
+        & (table_11['Scenario'] == 'post missing AND basal <2 ug/dL')
+        & (table_11['Outcome'] == 'HA exclusion (baseline >2 ug/dL OR post-ACTH >2 ug/dL)')
+        & (table_11['Urine test type'] == 'CLIApost')
+    ].iloc[0]
+    rows.append(
+        {
+            'Topic': 'Effect of additional-condition exclusions',
+            'Key finding': (
+                f"In UCCR CLIApost exclusion, specificity improved from {uccr_excl_clia['Specificity']} (base) "
+                f"to {addl_uccr_clia_lt1['Specificity']} with <1 filtering and {addl_uccr_clia_lt2['Specificity']} with <2 filtering"
+            ),
+            'Interpretation': 'Removing missing-post low-basal cases mainly strengthens CLIApost exclusion specificity while preserving sensitivity.',
+        }
+    )
+
+    if not table_13.empty:
+        auc_vals = pd.to_numeric(table_13['AUC'], errors='coerce').dropna()
+        auc_min = f"{auc_vals.min():.3f}" if len(auc_vals) else 'NA'
+        auc_max = f"{auc_vals.max():.3f}" if len(auc_vals) else 'NA'
+    else:
+        auc_min = 'NA'
+        auc_max = 'NA'
+    rows.append(
+        {
+            'Topic': 'ROC discrimination across all scenarios',
+            'Key finding': f'AUC range {auc_min} to {auc_max} across 24 curves',
+            'Interpretation': 'All scenario-specific models show high discrimination, indicating robust assay-based classification performance.',
+        }
+    )
+
+    rows.append(
+        {
+            'Topic': 'Perfect-classification cutoffs',
+            'Key finding': 'No group achieved 100% accuracy; several achieved isolated 100% sensitivity or 100% specificity cutoffs',
+            'Interpretation': 'The assays support strong but not perfect classification, so threshold choice should reflect whether sensitivity or specificity is prioritized.',
+        }
+    )
+
+    return pd.DataFrame(rows, columns=['Topic', 'Key finding', 'Interpretation'])
 
 
 table_2 = pd.DataFrame(
@@ -280,6 +452,8 @@ table_10 = pd.DataFrame(
 
 table_11 = build_additional_conditions_table(analysis_results_path, 'UCCR')
 table_12 = build_additional_conditions_table(urine_results_path, 'Urine cortisol')
+table_13 = build_roc_scenarios_table(roc_summary_path)
+table_14 = build_overall_interpretation_table(table_2, table_5, table_6, table_8, table_9, table_11, table_12, table_13)
 
 
 def write_table(sheet, start_row: int, label: str, subtitle: str, df: pd.DataFrame) -> int:
@@ -319,6 +493,8 @@ with pd.ExcelWriter(out_path, engine='openpyxl') as writer:
     table_10.to_excel(writer, sheet_name='Table_10_UrineCort_100pct', index=False)
     table_11.to_excel(writer, sheet_name='Table_11_UCCR_Addl_Conds', index=False)
     table_12.to_excel(writer, sheet_name='Table_12_Urine_Addl_Conds', index=False)
+    table_13.to_excel(writer, sheet_name='Table_13_ROC_Scenarios', index=False)
+    table_14.to_excel(writer, sheet_name='Table_14_Overall_Summary', index=False)
 
 wb = load_workbook(out_path)
 ws = wb['Comparison_Report']
@@ -407,6 +583,20 @@ next_row = write_table(
     'Rows excluded before calculation: post-ACTH missing AND basal cortisol below threshold (<1 or <2 ug/dL).',
     table_12,
 )
+next_row = write_table(
+    ws,
+    next_row,
+    'Table 13. ROC Summary Across Base and Additional Conditions',
+    'AUC and best-threshold ROC metrics by scenario, analysis, outcome, and urine test type.',
+    table_13,
+)
+next_row = write_table(
+    ws,
+    next_row,
+    'Table 14. Overall Interpretation Summary',
+    'Cross-table synthesis of cohort size, assay performance, scenario effects, and ROC discrimination.',
+    table_14,
+)
 
 ws.cell(row=next_row, column=1, value='Data Sources')
 ws.cell(row=next_row, column=1).font = Font(bold=True)
@@ -425,4 +615,4 @@ for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=13):
 wb.save(out_path)
 
 print(f'Wrote: {out_path}')
-print('Sheets: Comparison_Report, Table_2_Study_Comparison, Table_3_UCCR_IQR, Table_4_Urine_Cortisol, Table_5_Diagnosis_Cutoff, Table_6_Exclusion_Cutoff, Table_7_100pct_Cutoffs, Table_8_UrineCort_Diagnosis, Table_9_UrineCort_Exclusion, Table_10_UrineCort_100pct, Table_11_UCCR_Addl_Conds, Table_12_Urine_Addl_Conds')
+print('Sheets: Comparison_Report, Table_2_Study_Comparison, Table_3_UCCR_IQR, Table_4_Urine_Cortisol, Table_5_Diagnosis_Cutoff, Table_6_Exclusion_Cutoff, Table_7_100pct_Cutoffs, Table_8_UrineCort_Diagnosis, Table_9_UrineCort_Exclusion, Table_10_UrineCort_100pct, Table_11_UCCR_Addl_Conds, Table_12_Urine_Addl_Conds, Table_13_ROC_Scenarios, Table_14_Overall_Summary')

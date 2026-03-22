@@ -58,6 +58,15 @@ Using exclusion definition: baseline >2 ug/dL OR post-ACTH >2 ug/dL.
 | Current CLIApost | >=4.83 | 94.7% | 86.5% |
 | Current RIA | >=4.0 | 99.4% | 91.7% |
 
+## Overall Interpretation Across the Moya Comparison Workbook
+
+1. Overall discrimination is high across assay/outcome/scenario combinations, with ROC AUCs spanning approximately 0.94 to 0.99.
+2. For HA diagnosis, top-performing cutoffs are stable across scenarios: UCCR CLIApost <=4.6, UCCR RIA <=3.0, urine cortisol CLIApost <=27.59, and urine cortisol RIA <=55.00.
+3. For HA exclusion, RIA retains strong and stable specificity (UCCR >=4.0 with 91.7% specificity; urine cortisol >=58.00 with 100.0% specificity).
+4. Applying additional-condition exclusions (missing post-ACTH plus low basal) mainly improves CLIApost exclusion specificity while preserving sensitivity.
+5. No group reaches 100% overall accuracy; some groups achieve isolated 100% sensitivity or 100% specificity cutoffs, so threshold choice should follow whether rule-out or rule-in performance is prioritized.
+6. Compared with Moya, the current dataset is larger and supports robust stratified interpretation by assay type (CLIApost vs RIA).
+
 ## Data Sources in This Workspace
 
 - `processed/uccr_merged_standardized.csv`
