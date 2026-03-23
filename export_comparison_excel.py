@@ -263,6 +263,139 @@ def build_overall_interpretation_table(
     return pd.DataFrame(rows, columns=['Topic', 'Key finding', 'Interpretation'])
 
 
+def parse_pct_value(value) -> float:
+    s = str(value).strip()
+    if s.endswith('%'):
+        s = s[:-1]
+    return float(s) / 100.0
+
+
+def rates_to_2x2(sens: float, spec: float, n_pos: int, n_neg: int) -> tuple[int, int, int, int]:
+    tp = int(round(sens * n_pos))
+    fn = int(n_pos - tp)
+    tn = int(round(spec * n_neg))
+    fp = int(n_neg - tn)
+    return tp, fn, tn, fp
+
+
+def build_2x2_table(table_5: pd.DataFrame, analysis_payload: dict, urine_payload: dict) -> pd.DataFrame:
+    rows = []
+
+    def add_row(
+        source_table: str,
+        analysis_name: str,
+        outcome: str,
+        assay: str,
+        sens: float,
+        spec: float,
+        n_pos: int,
+        n_neg: int,
+        notes: str = '',
+    ) -> None:
+        tp, fn, tn, fp = rates_to_2x2(sens, spec, n_pos, n_neg)
+        rows.append(
+            {
+                'Source table': source_table,
+                'Analysis': analysis_name,
+                'Outcome': outcome,
+                'Assay/Protocol': assay,
+                'Sensitivity': f'{sens * 100:.1f}%',
+                'Specificity': f'{spec * 100:.1f}%',
+                'n_positive': int(n_pos),
+                'n_negative': int(n_neg),
+                'TP': tp,
+                'FN': fn,
+                'TN': tn,
+                'FP': fp,
+                'Notes': notes,
+            }
+        )
+
+    # Moya diagnosis rows (n=41 HA, 107 NAI in paper summary table).
+    for assay in ('Moya CLIA (=CLIApre)', 'Moya RIA'):
+        r = table_5.loc[table_5['Assay/Protocol'] == assay].iloc[0]
+        add_row(
+            source_table='Table 5',
+            analysis_name='UCCR',
+            outcome='Diagnosis',
+            assay=assay,
+            sens=parse_pct_value(r['Sensitivity']),
+            spec=parse_pct_value(r['Specificity']),
+            n_pos=41,
+            n_neg=107,
+            notes='Approximate integer 2x2 from published percentages (Moya n=41/107).',
+        )
+
+    # Current UCCR diagnosis/exclusion rows from recomputed JSON.
+    for urine_type in ('CLIApost', 'RIA'):
+        b = analysis_payload['best_cutoffs_diag_by_testtype'][urine_type]
+        add_row(
+            source_table='Table 5',
+            analysis_name='UCCR',
+            outcome='Diagnosis',
+            assay=f'Current {urine_type}',
+            sens=float(b['sensitivity']),
+            spec=float(b['specificity']),
+            n_pos=int(b['n_pos']),
+            n_neg=int(b['n_neg']),
+        )
+    for urine_type in ('CLIApost', 'RIA'):
+        b = analysis_payload['best_cutoffs_excl_by_testtype'][urine_type]
+        add_row(
+            source_table='Table 6',
+            analysis_name='UCCR',
+            outcome='Exclusion',
+            assay=f'Current {urine_type}',
+            sens=float(b['sensitivity']),
+            spec=float(b['specificity']),
+            n_pos=int(b['n_pos']),
+            n_neg=int(b['n_neg']),
+        )
+
+    # Current urine cortisol diagnosis/exclusion rows from recomputed JSON.
+    for urine_type in ('CLIApost', 'RIA'):
+        b = urine_payload['best_cutoffs_diag_by_testtype'][urine_type]
+        add_row(
+            source_table='Table 8',
+            analysis_name='Urine cortisol',
+            outcome='Diagnosis',
+            assay=urine_type,
+            sens=float(b['sensitivity']),
+            spec=float(b['specificity']),
+            n_pos=int(b['n_pos']),
+            n_neg=int(b['n_neg']),
+        )
+    for urine_type in ('CLIApost', 'RIA'):
+        b = urine_payload['best_cutoffs_excl_by_testtype'][urine_type]
+        add_row(
+            source_table='Table 9',
+            analysis_name='Urine cortisol',
+            outcome='Exclusion',
+            assay=urine_type,
+            sens=float(b['sensitivity']),
+            spec=float(b['specificity']),
+            n_pos=int(b['n_pos']),
+            n_neg=int(b['n_neg']),
+        )
+
+    cols = [
+        'Source table',
+        'Analysis',
+        'Outcome',
+        'Assay/Protocol',
+        'Sensitivity',
+        'Specificity',
+        'n_positive',
+        'n_negative',
+        'TP',
+        'FN',
+        'TN',
+        'FP',
+        'Notes',
+    ]
+    return pd.DataFrame(rows, columns=cols)
+
+
 table_2 = pd.DataFrame(
     [
         {
@@ -450,10 +583,14 @@ table_10 = pd.DataFrame(
 )
 
 
+analysis_payload = json.loads(analysis_results_path.read_text())
+urine_payload = json.loads(urine_results_path.read_text())
+
 table_11 = build_additional_conditions_table(analysis_results_path, 'UCCR')
 table_12 = build_additional_conditions_table(urine_results_path, 'Urine cortisol')
 table_13 = build_roc_scenarios_table(roc_summary_path)
 table_14 = build_overall_interpretation_table(table_2, table_5, table_6, table_8, table_9, table_11, table_12, table_13)
+table_15 = build_2x2_table(table_5, analysis_payload, urine_payload)
 
 
 def write_table(sheet, start_row: int, label: str, subtitle: str, df: pd.DataFrame) -> int:
@@ -495,6 +632,7 @@ with pd.ExcelWriter(out_path, engine='openpyxl') as writer:
     table_12.to_excel(writer, sheet_name='Table_12_Urine_Addl_Conds', index=False)
     table_13.to_excel(writer, sheet_name='Table_13_ROC_Scenarios', index=False)
     table_14.to_excel(writer, sheet_name='Table_14_Overall_Summary', index=False)
+    table_15.to_excel(writer, sheet_name='Table_15_2x2_Confusion', index=False)
 
 wb = load_workbook(out_path)
 ws = wb['Comparison_Report']
@@ -597,6 +735,13 @@ next_row = write_table(
     'Cross-table synthesis of cohort size, assay performance, scenario effects, and ROC discrimination.',
     table_14,
 )
+next_row = write_table(
+    ws,
+    next_row,
+    'Table 15. 2x2 Confusion Tables for Sensitivity/Specificity Rows',
+    'TP/FN/TN/FP per comparison row; Moya rows are approximate integer reconstructions from reported percentages.',
+    table_15,
+)
 
 ws.cell(row=next_row, column=1, value='Data Sources')
 ws.cell(row=next_row, column=1).font = Font(bold=True)
@@ -615,4 +760,4 @@ for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=13):
 wb.save(out_path)
 
 print(f'Wrote: {out_path}')
-print('Sheets: Comparison_Report, Table_2_Study_Comparison, Table_3_UCCR_IQR, Table_4_Urine_Cortisol, Table_5_Diagnosis_Cutoff, Table_6_Exclusion_Cutoff, Table_7_100pct_Cutoffs, Table_8_UrineCort_Diagnosis, Table_9_UrineCort_Exclusion, Table_10_UrineCort_100pct, Table_11_UCCR_Addl_Conds, Table_12_Urine_Addl_Conds, Table_13_ROC_Scenarios, Table_14_Overall_Summary')
+print('Sheets: Comparison_Report, Table_2_Study_Comparison, Table_3_UCCR_IQR, Table_4_Urine_Cortisol, Table_5_Diagnosis_Cutoff, Table_6_Exclusion_Cutoff, Table_7_100pct_Cutoffs, Table_8_UrineCort_Diagnosis, Table_9_UrineCort_Exclusion, Table_10_UrineCort_100pct, Table_11_UCCR_Addl_Conds, Table_12_Urine_Addl_Conds, Table_13_ROC_Scenarios, Table_14_Overall_Summary, Table_15_2x2_Confusion')
